@@ -1,0 +1,234 @@
+modules:
+
+module Permissions {
+
+    // Accounts pemissions.
+    // This file contains owner, whitelist and blacklist capabilities.
+    // This allows an owner to blacklist and whitelist other users to send
+    // Libra to only the owner can assign their own whitelist/blacklist capabilities.
+    // The owner hardcodes their account.
+
+    // Declare owner as a resource. It's only meant to be published once
+    resource Owner { }
+
+    // Declare a resource that declares an address's capabilities.
+    // Every address using LibrationCoin will need to publish a resource themselves.
+    // However, only the owner can change its content.
+    resource T {
+        whitelisted: bool,
+        blacklisted: bool,
+    }
+
+    // Every account should execute this once before using Capability and EToken module.
+    // If the sender is the hardcoded owner, then owner capability is published.
+    // Reverts if already published
+    public publish() {
+        let sender: address;
+        sender = get_txn_sender();
+
+        // Publish owner capability if sender is the privileged account
+        // Uncomment the following line in production and use a real owner account: if (move(sender) == 0x0) {
+        if (true) {
+            Self.grant_owner_capability();
+        }
+
+        // New capability with no permissions.
+        move_to_sender<T>(T{ whitelisted: false, blacklisted: false });
+        return;    
+    }
+
+    grant_owner_capability() {
+        move_to_sender<Owner>(Owner {});
+        return;
+    }
+
+    // Grants blacklist or whtelist capability to receiver.
+    // Can only succeed if sender owns the owner capability.
+    public grant_listed_capability(receiver: address, owner_capability: &R#Self.Owner, blacklist: bool) {
+        let capability_ref: &mut R#Self.T;
+
+        release(move(owner_capability));
+
+        // Pull a mutable reference to the receiver's capability, and change its permission.
+        capability_ref = borrow_global<T>(move(receiver));
+        if (blacklist) {
+            *(&mut move(capability_ref).blacklisted) = true;
+        } else {
+            *(&mut move(capability_ref).whitelisted) = true;
+        }
+
+        return;
+    }
+
+    // This returns an immutable reference to the owner capability if it exists.
+    // Is used by the owner to show ownership to privileged functions.
+    // Reverts if owner capability does not exist.
+    public borrow_owner_capability(): &R#Self.Owner {
+        let sender: address;
+        let owner_capability_ref: &mut R#Self.Owner;
+        let owner_capability_immut_ref: &R#Self.Owner;
+
+        sender = get_txn_sender();
+        owner_capability_ref = borrow_global<Owner>(move(sender));
+        owner_capability_immut_ref = freeze(move(owner_capability_ref));
+
+        return move(owner_capability_immut_ref);
+    }
+
+    // This returns an immutable reference to the general capability if it exists.
+    // Should be used by every account to prove capabilities.
+    // Reverts if capability does not exist.
+    public borrow_capability(): &R#Self.T {
+        let sender: address;
+        let capability_ref: &mut R#Self.T;
+        let capability_immut_ref: &R#Self.T;
+
+        sender = get_txn_sender();
+        capability_ref = borrow_global<T>(move(sender));
+        capability_immut_ref = freeze(move(capability_ref));
+
+        return move(capability_immut_ref);
+    }
+
+    // Return true if the capability is whitelisted
+    // and not blacklisted
+    public is_whitelisted(capability: &R#Self.T): bool {
+        let is_whitelisted: bool;
+        let is_blacklisted: bool;
+        is_whitelisted = *(&move(capability).whitelisted);
+        is_blacklisted = *(&move(capability).blacklisted);
+        return move(is_whitelisted) && !move(is_blacklisted);
+    }
+
+    // Reverts if capability is not whitelisted
+    public require_whitelisted(capability: &R#Self.T) {
+        let is_whitelisted: bool;
+        is_whitelisted = Self.is_whitelisted(move(capability));
+        assert(move(is_whitelisted), 0);
+        return;
+    }
+}
+
+module LibrationCoin {
+
+    // This module is responsible for an actual LibrationCoin.
+    // For it to be useful a capability has to be published by using the Capability module above.
+    
+    // -----------------------------------------------------------------
+
+    import Transaction.Capability;
+
+    // Declare the LibrationCoin resource, storing an account's total balance.
+    resource T {
+        value: u64,
+    }
+
+    // Publishes an initial zero LibrationCoin to the sender.
+    // Should be called once before using this module.
+    public publish() {
+        move_to_sender<T>(T{ value: 0 });
+        return;
+    }
+
+    // Mint new LibrationCoin.
+    public mint(value: u64): R#Self.T {
+        return T{value: move(value)};
+    }
+
+    // Returns an account's LibrationCoin balance.
+    // Reverts if an initial LibrationCoin hasn't been published.
+    public balance(): u64 {
+        let sender: address;
+        let token_ref: &mut R#Self.T;
+        let token_value: u64;
+
+        sender = get_txn_sender();
+        token_ref = borrow_global<T>(move(sender));
+        token_value = *(&move(token_ref).value);
+
+        return move(token_value);
+    }
+
+    // Deposit owned tokens to a payee's address, and destroy the tokens to deposit,
+    // Reverts if user is not whitelisted.
+    public deposit(payee: address, to_deposit: R#Self.T, capability: &R#Capability.T) {
+        let payee_token_ref: &mut R#Self.T;
+        let payee_token_value: u64;
+        let to_deposit_value: u64;
+
+        Capability.require_whitelisted(move(capability));
+
+        payee_token_ref = borrow_global<T>(move(payee));
+        payee_token_value = *(&copy(payee_token_ref).value);
+
+        // Unpack and destroy to_deposit tokens
+        T{ value: to_deposit_value } = move(to_deposit);
+
+        // Increase the payees balance with the destroyed token amount
+        *(&mut move(payee_token_ref).value) = move(payee_token_value) + move(to_deposit_value);
+
+        return;
+    }
+
+    // Withdraw an amount of tokens of the sender and return it.
+    // This works by splitting the token published and returning the specified amount as tokens. 
+    public withdraw(amount: u64, capability: &R#Capability.T): R#Self.T {
+        let sender: address;
+        let sender_token_ref: &mut R#Self.T;
+        let value: u64;
+
+        Capability.require_whitelisted(move(capability));
+
+        sender = get_txn_sender();
+        sender_token_ref = borrow_global<T>(move(sender));
+        value = *(&copy(sender_token_ref).value);
+
+        // Make sure that sender has enough tokens
+        assert(copy(value) >= copy(amount), 1);
+
+        // Split the senders token and return the amount specified
+        *(&mut move(sender_token_ref).value) = move(value) - copy(amount);
+        return T{ value: move(amount) };
+    }
+}
+
+script:
+
+
+import Transaction.Capability;
+import Transaction.LibrationCoin;
+
+// Tests functionality of LibrationCoin 
+main() {
+    let sender: address;
+    let owner_capability: &R#Capability.Owner;
+    let capability: &R#Capability.T;
+    let minted_tokens: R#LibrationCoin.T;
+    let balance: u64;
+
+    sender = get_txn_sender();
+
+    // Publish initial capability
+    Capability.publish();
+
+    // Borrow owner_capability for minter delegation
+    owner_capability = Capability.borrow_owner_capability();
+
+    // Borrow general capability for proof of minting capability
+    capability = Capability.borrow_capability();
+
+    // Publish an eToken account
+    LibrationCoin.publish();
+
+    // Mint 100 eTokens and prove minter capability
+    minted_tokens = LibrationCoin.mint(100, copy(capability));
+
+    // Deposit the freshly minted tokens to itself
+    LibrationCoin.deposit(move(sender), move(minted_tokens), move(capability));
+
+    // Test that the balance corresponds with the intended behaviour
+    balance = EToken.balance();
+    assert(move(balance) == 100, 3);
+
+    return;
+}
