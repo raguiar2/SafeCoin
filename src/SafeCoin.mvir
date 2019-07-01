@@ -12,7 +12,7 @@ module Permissions {
     resource Owner { }
 
     // Declare a resource that declares an address's capabilities.
-    // Every address using LibrationCoin will need to publish a resource themselves.
+    // Every address using SafeCoin will need to publish a resource themselves.
     // However, only the owner can change its content.
     resource T {
         whitelisted: bool,
@@ -109,34 +109,34 @@ module Permissions {
     }
 }
 
-module LibrationCoin {
+module SafeCoin {
 
-    // This module is responsible for an actual LibrationCoin.
+    // This module is responsible for an actual SafeCoin.
     // For it to be useful a capability has to be published by using the Capability module above.
     
     // -----------------------------------------------------------------
 
     import Transaction.Capability;
 
-    // Declare the LibrationCoin resource, storing an account's total balance.
+    // Declare the SafeCoin resource, storing an account's total balance.
     resource T {
         value: u64,
     }
 
-    // Publishes an initial zero LibrationCoin to the sender.
+    // Publishes an initial zero SafeCoin to the sender.
     // Should be called once before using this module.
     public publish() {
         move_to_sender<T>(T{ value: 0 });
         return;
     }
 
-    // Mint new LibrationCoin.
+    // Mint new SafeCoin.
     public mint(value: u64): R#Self.T {
         return T{value: move(value)};
     }
 
-    // Returns an account's LibrationCoin balance.
-    // Reverts if an initial LibrationCoin hasn't been published.
+    // Returns an account's SafeCoin balance.
+    // Reverts if an initial SafeCoin hasn't been published.
     public balance(): u64 {
         let sender: address;
         let token_ref: &mut R#Self.T;
@@ -196,14 +196,14 @@ script:
 
 
 import Transaction.Capability;
-import Transaction.LibrationCoin;
+import Transaction.SafeCoin;
 
-// Tests functionality of LibrationCoin 
+// Tests functionality of SafeCoin 
 main() {
     let sender: address;
     let owner_capability: &R#Capability.Owner;
     let capability: &R#Capability.T;
-    let minted_tokens: R#LibrationCoin.T;
+    let minted_tokens: R#SafeCoin.T;
     let balance: u64;
 
     sender = get_txn_sender();
@@ -218,13 +218,13 @@ main() {
     capability = Capability.borrow_capability();
 
     // Publish an eToken account
-    LibrationCoin.publish();
+    SafeCoin.publish();
 
     // Mint 100 eTokens and prove minter capability
-    minted_tokens = LibrationCoin.mint(100, copy(capability));
+    minted_tokens = SafeCoin.mint(100, copy(capability));
 
     // Deposit the freshly minted tokens to itself
-    LibrationCoin.deposit(move(sender), move(minted_tokens), move(capability));
+    SafeCoin.deposit(move(sender), move(minted_tokens), move(capability));
 
     // Test that the balance corresponds with the intended behaviour
     balance = EToken.balance();
